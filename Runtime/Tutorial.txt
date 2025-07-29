@@ -1,0 +1,20 @@
+Los requerimientos deberian instalarse automaticamente al incluir el paquete en su proyecto.
+NO incluir parte de este paquete o sus dependencias en el .unitypackage distribuible.
+Se asume que se usa la ultima version de todas las dependencias a menos que se especifique lo contrario.
+
+Requerimientos:
+- VRChat SDK - Base
+- VRChat SDK - Avatars
+- VRCFury
+- Poyomi Toon
+
+Instrucciones para creadores:
+- Crear una carpeta nueva en !VRTon2025 para cada asset que se cree.
+- Usar "VRTONBasePrefab" como base para crear sus propios prefab.
+  - En el mismo pueden asignar controladores de animacion, parametros y menus que se añadiran al avatar.
+  - Dirigirse a la documentacion de VRCFury para mas detalles sobre como usarlo.
+- Utilizar "Resources/Textures/VRTON2025_ATLAS.png" para texturizar sus assets cuando sea posible.
+  - Esta textura contiene los colores y logos oficiales de VRTON2025.
+  - Reducir la cantidad de texturas y materiales en el prefab para optimizar el rendimiento.
+
+Cualquier consulta pueden hacerla en el canal de "assets-3D" pingeando a PichuJef

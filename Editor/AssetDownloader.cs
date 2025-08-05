@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.IO;
 using UnityEngine.Networking;
 using System;
+using System.Threading.Tasks;
 
 // This script is used to download .unitypackage files from a specified URL and import them into the Unity project.
 // It will list a set of assets available for download and allow the user to select and download them.
@@ -39,7 +40,7 @@ public class AssetDownloader : EditorWindow
 {
     private AssetCatalog catalog;
     private Vector2 scrollPosition;
-    private string catalogUrl = "http://vrton.org/data/catalog.json";
+    private string catalogUrl = "https://vrton.org/data/catalog.json";
     private string tempDownloadPath;
     private bool isLoadingCatalog = false;
     private string statusMessage = "";
@@ -47,6 +48,10 @@ public class AssetDownloader : EditorWindow
     private GUIStyle titleStyle;
     private Texture2D bannerTexture;
     private Dictionary<string, UnityWebRequest> activeDownloads = new Dictionary<string, UnityWebRequest>();
+    private HashSet<string> loadingImages = new HashSet<string>();
+    private HashSet<string> loadingSizes = new HashSet<string>();
+    private const int MAX_DOWNLOAD_SIZE_MB = 500; // Maximum download size in MB
+    private const int REQUEST_TIMEOUT_SECONDS = 30;
 
     [MenuItem("VRTon/Asset Downloader")]
     public static void ShowWindow()
@@ -56,7 +61,7 @@ public class AssetDownloader : EditorWindow
         window.Show();
     }
 
-    private void OnEnable()
+    private async void OnEnable()
     {
         tempDownloadPath = Path.Combine(Application.temporaryCachePath, "AssetDownloader");
         if (!Directory.Exists(tempDownloadPath))
@@ -67,7 +72,7 @@ public class AssetDownloader : EditorWindow
         // Load banner texture
         bannerTexture = Resources.Load<Texture2D>("VRTonBanner");
         
-        LoadCatalog();
+        await LoadCatalog();
         EditorApplication.update += UpdateDownloads;
     }
 
@@ -84,6 +89,28 @@ public class AssetDownloader : EditorWindow
             }
         }
         activeDownloads.Clear();
+        loadingImages.Clear();
+        loadingSizes.Clear();
+        
+        // Clean up preview images to prevent memory leaks
+        if (catalog?.assets != null)
+        {
+            foreach (var asset in catalog.assets)
+            {
+                if (asset.previewImage != null)
+                {
+                    DestroyImmediate(asset.previewImage);
+                    asset.previewImage = null;
+                }
+            }
+        }
+        
+        // Clean up banner texture if it was loaded
+        if (bannerTexture != null)
+        {
+            // Don't destroy Resources.Load textures, Unity handles them
+            bannerTexture = null;
+        }
     }
 
     private void InitializeStyles()
@@ -147,7 +174,7 @@ public class AssetDownloader : EditorWindow
         GUILayout.FlexibleSpace();
         if (GUILayout.Button("Refresh Catalog", GUILayout.Width(100)))
         {
-            LoadCatalog();
+            _ = LoadCatalog(); // Fire and forget with discard
         }
         EditorGUILayout.EndHorizontal();
 
@@ -204,7 +231,7 @@ public class AssetDownloader : EditorWindow
             GUILayout.Box("No Image", GUILayout.Width(64), GUILayout.Height(64));
             if (!string.IsNullOrEmpty(asset.imageUrl))
             {
-                LoadPreviewImage(asset);
+                _ = LoadPreviewImage(asset); // Fire and forget
             }
         }
 
@@ -220,7 +247,7 @@ public class AssetDownloader : EditorWindow
         else if (!string.IsNullOrEmpty(asset.downloadUrl))
         {
             EditorGUILayout.LabelField("Size: Calculating...");
-            LoadFileSizeDynamically(asset);
+            _ = LoadFileSizeDynamically(asset); // Fire and forget
         }
         EditorGUILayout.LabelField(asset.description, EditorStyles.wordWrappedLabel);
         EditorGUILayout.EndVertical();
@@ -236,7 +263,7 @@ public class AssetDownloader : EditorWindow
         {
             if (GUILayout.Button("Download"))
             {
-                DownloadAsset(asset);
+                _ = DownloadAsset(asset); // Fire and forget
             }
         }
         
@@ -245,52 +272,90 @@ public class AssetDownloader : EditorWindow
         EditorGUILayout.EndVertical();
     }
 
-    private async void LoadCatalog()
+    private async Task LoadCatalog()
     {
+        if (isLoadingCatalog) return; // Prevent multiple simultaneous loads
+        
         isLoadingCatalog = true;
         statusMessage = "Loading catalog...";
 
+        UnityWebRequest request = null;
         try
         {
-            UnityWebRequest request = UnityWebRequest.Get(catalogUrl);
+            request = UnityWebRequest.Get(catalogUrl);
+            request.timeout = REQUEST_TIMEOUT_SECONDS;
             var operation = request.SendWebRequest();
 
-            while (!operation.isDone)
+            // Wait with timeout
+            var startTime = EditorApplication.timeSinceStartup;
+            while (!operation.isDone && (EditorApplication.timeSinceStartup - startTime) < REQUEST_TIMEOUT_SECONDS)
             {
-                await System.Threading.Tasks.Task.Delay(100);
+                await Task.Delay(100);
+            }
+
+            if (!operation.isDone)
+            {
+                request.Abort();
+                statusMessage = "Request timed out. Please check your internet connection.";
+                return;
             }
 
             if (request.result == UnityWebRequest.Result.Success)
             {
                 string jsonData = request.downloadHandler.text;
                 
+                // Validate JSON data
+                if (string.IsNullOrEmpty(jsonData))
+                {
+                    statusMessage = "Received empty catalog data.";
+                    return;
+                }
+                
                 // If this is a GitHub API response, extract the content
                 if (catalogUrl.Contains("api.github.com"))
                 {
-                    GitHubFileResponse response = JsonUtility.FromJson<GitHubFileResponse>(jsonData);
-                    if (!string.IsNullOrEmpty(response.content))
+                    try
                     {
-                        jsonData = System.Text.Encoding.UTF8.GetString(System.Convert.FromBase64String(response.content));
+                        GitHubFileResponse response = JsonUtility.FromJson<GitHubFileResponse>(jsonData);
+                        if (!string.IsNullOrEmpty(response.content))
+                        {
+                            jsonData = System.Text.Encoding.UTF8.GetString(System.Convert.FromBase64String(response.content));
+                        }
+                    }
+                    catch (Exception githubParseEx)
+                    {
+                        statusMessage = $"Failed to parse GitHub API response: {githubParseEx.Message}";
+                        Debug.LogError($"GitHub API parsing error: {githubParseEx}");
+                        return;
                     }
                 }
 
-                catalog = JsonUtility.FromJson<AssetCatalog>(jsonData);
-                
-                // Filter out assets with invalid download URLs
-                if (catalog?.assets != null)
+                try
                 {
+                    catalog = JsonUtility.FromJson<AssetCatalog>(jsonData);
+                    
+                    if (catalog?.assets == null)
+                    {
+                        statusMessage = "Invalid catalog format: no assets found.";
+                        return;
+                    }
+                    
+                    // Filter out assets with invalid download URLs
                     catalog.assets = catalog.assets.FindAll(asset => IsValidDownloadUrl(asset.downloadUrl));
+                    
+                    statusMessage = $"Loaded {catalog.assets.Count} valid assets";
                 }
-                
-                statusMessage = $"Loaded {catalog.assets.Count} assets";
+                catch (Exception jsonParseEx)
+                {
+                    statusMessage = $"Failed to parse catalog JSON: {jsonParseEx.Message}";
+                    Debug.LogError($"JSON parsing error: {jsonParseEx}");
+                }
             }
             else
             {
                 statusMessage = $"Failed to load catalog: {request.error}";
                 Debug.LogError($"Catalog loading failed: {request.error}");
             }
-
-            request.Dispose();
         }
         catch (Exception e)
         {
@@ -299,53 +364,79 @@ public class AssetDownloader : EditorWindow
         }
         finally
         {
+            request?.Dispose();
             isLoadingCatalog = false;
             Repaint();
         }
     }
 
-    private async void LoadPreviewImage(AssetInfo asset)
+    private async Task LoadPreviewImage(AssetInfo asset)
     {
-        if (string.IsNullOrEmpty(asset.imageUrl) || asset.previewImage != null)
+        if (string.IsNullOrEmpty(asset.imageUrl) || asset.previewImage != null || loadingImages.Contains(asset.imageUrl))
             return;
 
+        loadingImages.Add(asset.imageUrl);
+        UnityWebRequest request = null;
+        
         try
         {
-            UnityWebRequest request = UnityWebRequestTexture.GetTexture(asset.imageUrl);
+            request = UnityWebRequestTexture.GetTexture(asset.imageUrl);
+            request.timeout = REQUEST_TIMEOUT_SECONDS;
             var operation = request.SendWebRequest();
 
-            while (!operation.isDone)
+            var startTime = EditorApplication.timeSinceStartup;
+            while (!operation.isDone && (EditorApplication.timeSinceStartup - startTime) < REQUEST_TIMEOUT_SECONDS)
             {
-                await System.Threading.Tasks.Task.Delay(100);
+                await Task.Delay(100);
+            }
+
+            if (!operation.isDone)
+            {
+                request.Abort();
+                return;
             }
 
             if (request.result == UnityWebRequest.Result.Success)
             {
                 asset.previewImage = ((DownloadHandlerTexture)request.downloadHandler).texture;
-                Repaint();
+                EditorApplication.delayCall += Repaint; // Thread-safe UI update
             }
-
-            request.Dispose();
         }
         catch (Exception e)
         {
             Debug.LogWarning($"Failed to load preview image for {asset.name}: {e.Message}");
         }
+        finally
+        {
+            request?.Dispose();
+            loadingImages.Remove(asset.imageUrl);
+        }
     }
 
-    private async void LoadFileSizeDynamically(AssetInfo asset)
+    private async Task LoadFileSizeDynamically(AssetInfo asset)
     {
-        if (string.IsNullOrEmpty(asset.downloadUrl) || asset.fileSize > 0)
+        if (string.IsNullOrEmpty(asset.downloadUrl) || asset.fileSize > 0 || loadingSizes.Contains(asset.downloadUrl))
             return;
 
+        loadingSizes.Add(asset.downloadUrl);
+        UnityWebRequest request = null;
+        
         try
         {
-            UnityWebRequest request = UnityWebRequest.Head(asset.downloadUrl);
+            request = UnityWebRequest.Head(asset.downloadUrl);
+            request.timeout = REQUEST_TIMEOUT_SECONDS;
             var operation = request.SendWebRequest();
 
-            while (!operation.isDone)
+            var startTime = EditorApplication.timeSinceStartup;
+            while (!operation.isDone && (EditorApplication.timeSinceStartup - startTime) < REQUEST_TIMEOUT_SECONDS)
             {
-                await System.Threading.Tasks.Task.Delay(100);
+                await Task.Delay(100);
+            }
+
+            if (!operation.isDone)
+            {
+                request.Abort();
+                return;
             }
 
             if (request.result == UnityWebRequest.Result.Success)
@@ -354,63 +445,120 @@ public class AssetDownloader : EditorWindow
                 if (!string.IsNullOrEmpty(contentLength) && long.TryParse(contentLength, out long size))
                 {
                     asset.fileSize = size;
-                    Repaint();
+                    EditorApplication.delayCall += Repaint; // Thread-safe UI update
                 }
             }
-
-            request.Dispose();
         }
         catch (Exception e)
         {
             Debug.LogWarning($"Failed to get file size for {asset.name}: {e.Message}");
         }
+        finally
+        {
+            request?.Dispose();
+            loadingSizes.Remove(asset.downloadUrl);
+        }
     }
 
-    private async void DownloadAsset(AssetInfo asset)
+    private async Task DownloadAsset(AssetInfo asset)
     {
         if (asset.isDownloading || string.IsNullOrEmpty(asset.downloadUrl))
             return;
 
+        // Validate file size before download
+        if (asset.fileSize > MAX_DOWNLOAD_SIZE_MB * 1024 * 1024)
+        {
+            statusMessage = $"File too large: {asset.name} ({FormatFileSize(asset.fileSize)}) exceeds {MAX_DOWNLOAD_SIZE_MB}MB limit";
+            return;
+        }
+
         asset.isDownloading = true;
         asset.downloadProgress = 0f;
         
-        string fileName = $"{asset.name}_{asset.version}.unitypackage";
+        // Sanitize filename to prevent path traversal
+        string sanitizedName = string.Join("_", asset.name.Split(Path.GetInvalidFileNameChars()));
+        string sanitizedVersion = string.Join("_", asset.version.Split(Path.GetInvalidFileNameChars()));
+        string fileName = $"{sanitizedName}_{sanitizedVersion}.unitypackage";
         string filePath = Path.Combine(tempDownloadPath, fileName);
 
+        UnityWebRequest request = null;
         try
         {
-            UnityWebRequest request = UnityWebRequest.Get(asset.downloadUrl);
+            request = UnityWebRequest.Get(asset.downloadUrl);
+            request.timeout = REQUEST_TIMEOUT_SECONDS;
             activeDownloads[asset.name] = request;
             
             var operation = request.SendWebRequest();
+            var startTime = EditorApplication.timeSinceStartup;
 
-            while (!operation.isDone)
+            while (!operation.isDone && (EditorApplication.timeSinceStartup - startTime) < REQUEST_TIMEOUT_SECONDS * 10) // Longer timeout for downloads
             {
                 asset.downloadProgress = operation.progress;
-                Repaint();
-                await System.Threading.Tasks.Task.Delay(100);
+                EditorApplication.delayCall += Repaint;
+                await Task.Delay(100);
+            }
+
+            if (!operation.isDone)
+            {
+                request.Abort();
+                statusMessage = $"Download timeout for {asset.name}";
+                return;
             }
 
             if (request.result == UnityWebRequest.Result.Success)
             {
-                File.WriteAllBytes(filePath, request.downloadHandler.data);
+                // Validate download size
+                byte[] data = request.downloadHandler.data;
+                if (data == null || data.Length == 0)
+                {
+                    statusMessage = $"Downloaded file is empty: {asset.name}";
+                    return;
+                }
+
+                if (data.Length > MAX_DOWNLOAD_SIZE_MB * 1024 * 1024)
+                {
+                    statusMessage = $"Downloaded file too large: {asset.name}";
+                    return;
+                }
+
+                // Write file safely
+                Directory.CreateDirectory(Path.GetDirectoryName(filePath));
+                File.WriteAllBytes(filePath, data);
+                
+                // Validate file exists and has content
+                if (!File.Exists(filePath) || new FileInfo(filePath).Length == 0)
+                {
+                    statusMessage = $"Failed to save download: {asset.name}";
+                    return;
+                }
                 
                 // Import the package
-                AssetDatabase.ImportPackage(filePath, true);
-                
-                statusMessage = $"Successfully downloaded and imported {asset.name}";
+                try
+                {
+                    AssetDatabase.ImportPackage(filePath, true);
+                    statusMessage = $"Successfully downloaded and imported {asset.name}";
+                }
+                catch (Exception importEx)
+                {
+                    statusMessage = $"Download successful but import failed for {asset.name}: {importEx.Message}";
+                    Debug.LogError($"Import failed for {asset.name}: {importEx}");
+                }
                 
                 // Clean up the temporary file
-                File.Delete(filePath);
+                try
+                {
+                    File.Delete(filePath);
+                }
+                catch (Exception deleteEx)
+                {
+                    Debug.LogWarning($"Failed to delete temporary file {filePath}: {deleteEx.Message}");
+                }
             }
             else
             {
                 statusMessage = $"Failed to download {asset.name}: {request.error}";
                 Debug.LogError($"Download failed for {asset.name}: {request.error}");
             }
-
-            activeDownloads.Remove(asset.name);
-            request.Dispose();
         }
         catch (Exception e)
         {
@@ -419,8 +567,10 @@ public class AssetDownloader : EditorWindow
         }
         finally
         {
+            activeDownloads.Remove(asset.name);
+            request?.Dispose();
             asset.isDownloading = false;
-            Repaint();
+            EditorApplication.delayCall += Repaint;
         }
     }
 
@@ -468,14 +618,28 @@ public class AssetDownloader : EditorWindow
         if (uriResult.Scheme != Uri.UriSchemeHttp && uriResult.Scheme != Uri.UriSchemeHttps)
             return false;
 
-        // Additional checks for common file extensions that indicate downloadable content
+        // Block localhost and private IP ranges for security
+        string host = uriResult.Host.ToLower();
+        if (host == "localhost" || host == "127.0.0.1" || host.StartsWith("192.168.") || 
+            host.StartsWith("10.") || host.StartsWith("172."))
+        {
+            // Allow localhost only in development (when catalog URL is localhost)
+            if (!catalogUrl.Contains("127.0.0.1") && !catalogUrl.Contains("localhost"))
+                return false;
+        }
+
+        // More strict validation for downloadable content
         string lowerUrl = url.ToLower();
-        return lowerUrl.Contains(".unitypackage") || 
-               lowerUrl.Contains("/download") || 
-               lowerUrl.Contains("/releases/") ||
-               lowerUrl.Contains("github.com") ||
-               lowerUrl.EndsWith(".zip") ||
-               lowerUrl.EndsWith(".tar.gz");
+        bool hasValidExtension = lowerUrl.EndsWith(".unitypackage") || 
+                                lowerUrl.EndsWith(".zip") || 
+                                lowerUrl.EndsWith(".tar.gz");
+        
+        bool hasValidPath = lowerUrl.Contains("/download") || 
+                           lowerUrl.Contains("/releases/") ||
+                           lowerUrl.Contains("/attachments/") ||
+                           (lowerUrl.Contains("github.com") && (lowerUrl.Contains("/releases/") || lowerUrl.Contains("/download/")));
+
+        return hasValidExtension || hasValidPath;
     }
 
     [System.Serializable]

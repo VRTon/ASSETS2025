@@ -1,6 +1,6 @@
 {
   "name": "org.vrton.assets2025",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "displayName": "VRTON ASSETS 2025",
   "description": "VRTON ASSETS 2025",
   "author": {
@@ -11,5 +11,6 @@
   "vpmDependencies": {
     "com.poiyomi.toon": "^9.2.67",
     "com.vrcfury.vrcfury": "^1.1241.0"
-  }
+  },
+  "hideInEditor": false
 }

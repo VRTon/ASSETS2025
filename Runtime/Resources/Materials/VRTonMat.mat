@@ -24,7 +24,21 @@ Material:
   m_EnableInstancingVariants: 0
   m_DoubleSidedGI: 0
   m_CustomRenderQueue: 2000
-  stringTagMap: {}
+  stringTagMap:
+    _MochieMetallicMaps_texPack_a_channel: 4
+    _MochieMetallicMaps_texPack_a_fallback: 0
+    _MochieMetallicMaps_texPack_a_inverted: False
+    _MochieMetallicMaps_texPack_b_channel: 4
+    _MochieMetallicMaps_texPack_b_fallback: 0
+    _MochieMetallicMaps_texPack_b_inverted: False
+    _MochieMetallicMaps_texPack_g_channel: 4
+    _MochieMetallicMaps_texPack_g_fallback: 0
+    _MochieMetallicMaps_texPack_g_inverted: False
+    _MochieMetallicMaps_texPack_lastConfirmTime: 1755107373
+    _MochieMetallicMaps_texPack_r_channel: 4
+    _MochieMetallicMaps_texPack_r_fallback: 0
+    _MochieMetallicMaps_texPack_r_guid: 7969cb397319d2d45b2210758dfcfa4b
+    _MochieMetallicMaps_texPack_r_inverted: False
   disabledShaderPasses: []
   m_LockedProperties: 
   m_SavedProperties:
@@ -371,7 +385,7 @@ Material:
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _MochieMetallicMaps:
-        m_Texture: {fileID: 0}
+        m_Texture: {fileID: 2800000, guid: f4a8da75452e6c44aa1eaf64bd606513, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _MochieReflCube:
@@ -2148,16 +2162,16 @@ Material:
     - _MochieMetallicMapsRoughnessChannel: 1
     - _MochieMetallicMapsSpecularMaskChannel: 3
     - _MochieMetallicMapsStochastic: 0
-    - _MochieMetallicMapsUV: 0
+    - _MochieMetallicMapsUV: 1
     - _MochieMetallicMasksUV: 0
-    - _MochieMetallicMultiplier: 0
+    - _MochieMetallicMultiplier: 1
     - _MochieReflectionMaskInvert: 0
     - _MochieReflectionStrength: 1
     - _MochieReflectionStrengthGlobalMask: 0
     - _MochieReflectionStrengthGlobalMaskBlendType: 2
     - _MochieReflectionTintThemeIndex: 0
     - _MochieRoughnessMapInvert: 0
-    - _MochieRoughnessMultiplier: 0.5
+    - _MochieRoughnessMultiplier: 1
     - _MochieRoughnessMultiplier2: 1
     - _MochieSmoothnessGlobalMask: 0
     - _MochieSmoothnessGlobalMaskBlendType: 2
@@ -3008,6 +3022,7 @@ Material:
     - m_end_TextInstanceTime: 0
     - m_end_TextNumeric: 0
     - m_end_TextPosition: 0
+    - m_end_TruchetAudioLink: 0
     - m_end_TruchetudioLink: 0
     - m_end_UVTileDissolve: 0
     - m_end_UVTileDissolveRow0: 0
@@ -3156,6 +3171,7 @@ Material:
     - m_start_TextInstanceTime: 0
     - m_start_TextNumeric: 0
     - m_start_TextPosition: 0
+    - m_start_TruchetAudioLink: 0
     - m_start_TruchetudioLink: 0
     - m_start_UVTileDissolve: 0
     - m_start_UVTileDissolveRow0: 0
@@ -3171,7 +3187,7 @@ Material:
     - m_start_backFace: 0
     - m_start_backlight: 0
     - m_start_blending: 0
-    - m_start_brdf: 0
+    - m_start_brdf: 1
     - m_start_clearCoat: 0
     - m_start_clearcoatadvanced: 0
     - m_start_clearcoatglobalmask: 0

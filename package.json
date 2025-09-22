@@ -1,0 +1,16 @@
+{
+  "name": "org.vrton.assets2025",
+  "version": "2.0.2",
+  "displayName": "VRTON ASSETS 2025",
+  "description": "VRTON ASSETS 2025",
+  "author": {
+    "email": "vrtonoficial@gmail.com",
+    "name": "VRTon",
+    "url": "https://vrton.org"
+  },
+  "vpmDependencies": {
+    "com.poiyomi.toon": "^9.2.67",
+    "com.vrcfury.vrcfury": "^1.1241.0"
+  },
+  "hideInEditor": false
+}
